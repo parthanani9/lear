@@ -95,14 +95,14 @@ export default function ReportsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Pivot snapshots for multi-line chart
+    // Pivot snapshots for multi-line chart
   const valueByWeek: Record<string, Record<string, number>> = {};
-const facilityNames = Array.from(new Set(snapshots.map(s => s.facility)));  for (const s of snapshots) {
+  const facilityNames = Array.from(new Set(snapshots.map(s => s.facility)));
+  for (const s of snapshots) {
     if (!valueByWeek[s.week]) valueByWeek[s.week] = { week: s.week as unknown as number };
     valueByWeek[s.week][s.facility] = s.value;
   }
   const valueData = Object.values(valueByWeek);
-
   const LINE_COLORS = ["#D82A28","#2B5FA8","#2E9E5B","#C97A1E","#9A9A9A"];
 
   return (
