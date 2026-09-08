@@ -2,12 +2,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-import type { ReplenishmentRecommendation, AbcClass, ReplenishmentStatus } from "@/types";
+import type { ReplenishmentRecommendation } from "@/types";
 import { RefreshCw, Filter, PlusCircle, Download, ChevronDown } from "lucide-react";
 import PageHeader from "@/components/layout/PageHeader";
 import clsx from "clsx";
 
-const STATUS_OPTS: { label: string; value: string }[] = [
+const STATUS_OPTS = [
   { label: "All", value: "ALL" },
   { label: "Stockout", value: "STOCKOUT" },
   { label: "Below Min", value: "BELOW_MIN" },
@@ -21,7 +21,7 @@ const ABC_OPTS = [
   { label: "C — Standard", value: "C" },
 ];
 
-function StatusBadge({ s }: { s: ReplenishmentStatus }) {
+function StatusBadge({ s }: { s: string }) {
   const m: Record<string,string> = { STOCKOUT:"status-stockout", BELOW_MIN:"status-below-min", AT_REORDER:"status-at-reorder", HEALTHY:"status-healthy" };
   const l: Record<string,string> = { STOCKOUT:"Stockout", BELOW_MIN:"Below Min", AT_REORDER:"At Reorder", HEALTHY:"Healthy" };
   return <span className={m[s]}>{l[s]}</span>;
@@ -35,17 +35,23 @@ export default function ReplenishmentPage() {
   const isManager    = ["manager","admin"].includes(role);
   const canCreate    = ["planner","manager","admin"].includes(role);
 
-  const [recs, setRecs]               = useState<ReplenishmentRecommendation[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [abcFilter, setAbcFilter]     = useState("ALL");
+  const [recs, setRecs]                     = useState<ReplenishmentRecommendation[]>([]);
+  const [loading, setLoading]               = useState(true);
+  const [statusFilter, setStatusFilter]     = useState("ALL");
+  const [abcFilter, setAbcFilter]           = useState("ALL");
   const [facilityFilter, setFacilityFilter] = useState("ALL");
-  const [facilities, setFacilities]   = useState<{ id: string; name: string }[]>([]);
-  const [modal, setModal]             = useState<ReplenishmentRecommendation | null>(null);
-  const [creating, setCreating]       = useState(false);
-  const [qty, setQty]                 = useState("");
-  const [supplier, setSupplier]       = useState("Balluff de Mexico SA de CV");
-  const [justification, setJustification] = useState("");
+  const [facilities, setFacilities]         = useState<{ id: string; name: string }[]>([]);
+  const [modal, setModal]                   = useState<ReplenishmentRecommendation | null>(null);
+  const [creating, setCreating]             = useState(false);
+  const [qty, setQty]                       = useState("");
+  const [supplier, setSupplier]             = useState("Balluff de Mexico SA de CV");
+  const [justification, setJustification]   = useState("");
+  const [toast, setToast]                   = useState("");
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 3000);
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -59,22 +65,18 @@ export default function ReplenishmentPage() {
     if (!isManager && facilityId) q = q.eq("facility_id", facilityId);
     else if (facilityFilter !== "ALL") q = q.eq("facility_id", facilityFilter);
     if (statusFilter !== "ALL") q = q.eq("status", statusFilter);
-    if (abcFilter !== "ALL") q = q.eq("abc_class", abcFilter);
+    if (abcFilter !== "ALL")    q = q.eq("abc_class", abcFilter);
 
     const { data } = await q;
     setRecs((data as ReplenishmentRecommendation[]) ?? []);
     setLoading(false);
   }, [supabase, isManager, facilityId, facilityFilter, statusFilter, abcFilter]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
     if (!isManager) return;
-    supabase.from("facilities").select("id, name").then(({ data }) =>
-      setFacilities(data ?? [])
-    );
+    supabase.from("facilities").select("id, name").then(({ data }) => setFacilities(data ?? []));
   }, [isManager, supabase]);
 
   async function runEngine() {
@@ -87,21 +89,59 @@ export default function ReplenishmentPage() {
     if (!modal || !authUser) return;
     setCreating(true);
     const coupa_req_id = `REQ-${Math.floor(1000000 + Math.random() * 9000000)}`;
+    const orderQty = parseFloat(qty) || modal.recommended_qty;
+
     await supabase.from("purchase_orders").insert({
       coupa_req_id,
-      item_id:      modal.item_id,
-      facility_id:  modal.facility_id,
+      item_id:       modal.item_id,
+      facility_id:   modal.facility_id,
       supplier_name: supplier,
-      qty:          parseFloat(qty) || modal.recommended_qty,
-      unit_cost:    modal.items?.unit_cost,
-      currency:     "MXN",
-      status:       "SUBMITTED",
-      submitted_at: new Date().toISOString(),
+      qty:           orderQty,
+      unit_cost:     modal.items?.unit_cost,
+      currency:      "MXN",
+      status:        "SUBMITTED",
+      submitted_at:  new Date().toISOString(),
       justification,
-      created_by:   authUser.id,
+      created_by:    authUser.id,
     });
+
+    // Notify managers of new requisition
+    const { data: managers } = await supabase
+      .from("user_profiles")
+      .select("id")
+      .in("role", ["manager", "admin"]);
+
+    for (const mgr of managers ?? []) {
+      await supabase.from("notifications").insert({
+        user_id: mgr.id,
+        title:   "New Requisition Created",
+        message: `${authUser.profile.full_name} created ${coupa_req_id} for ${modal.items?.sku_code} — ${orderQty} units from ${supplier}.`,
+        type:    "info",
+        link:    "/requisitions",
+      });
+    }
+
+    // Also notify the planner's area lead
+    const { data: areaLeads } = await supabase
+      .from("user_profiles")
+      .select("id")
+      .eq("facility_id", modal.facility_id)
+      .eq("role", "area_lead");
+
+    for (const lead of areaLeads ?? []) {
+      await supabase.from("notifications").insert({
+        user_id: lead.id,
+        title:   "Requisition Submitted",
+        message: `${coupa_req_id} submitted for ${modal.items?.sku_code} — ${orderQty} units. Status: Submitted to Coupa.`,
+        type:    "info",
+        link:    "/requisitions",
+      });
+    }
+
     setCreating(false);
     setModal(null);
+    setJustification("");
+    showToast(`✓ ${coupa_req_id} created and submitted to Coupa`);
     loadData();
   }
 
@@ -126,6 +166,14 @@ export default function ReplenishmentPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-5 right-5 z-50 px-4 py-3 rounded shadow-lg text-sm font-semibold text-white bg-success">
+          {toast}
+        </div>
+      )}
+
       <PageHeader
         title="Replenishment"
         subtitle={`Daily MRP recommendations — ${new Date().toLocaleDateString("en-MX", { dateStyle:"long" })}`}
@@ -159,10 +207,10 @@ export default function ReplenishmentPage() {
       {/* Summary pills */}
       <div className="flex gap-3 mb-4 flex-wrap">
         {[
-          { label: "Stockouts",   count: recs.filter(r=>r.status==="STOCKOUT").length,   cls:"bg-red-50 text-lear-red border-lear-red/30" },
-          { label: "Below Min",   count: recs.filter(r=>r.status==="BELOW_MIN").length,  cls:"bg-amber-50 text-warning border-warning/30" },
-          { label: "At Reorder",  count: recs.filter(r=>r.status==="AT_REORDER").length, cls:"bg-blue-50 text-info border-info/30" },
-          { label: "Total Items", count: recs.length,                                    cls:"bg-lear-gray-050 text-lear-gray-600 border-lear-gray-200" },
+          { label:"Stockouts",   count: recs.filter(r=>r.status==="STOCKOUT").length,   cls:"bg-red-50 text-lear-red border-lear-red/30" },
+          { label:"Below Min",   count: recs.filter(r=>r.status==="BELOW_MIN").length,  cls:"bg-amber-50 text-warning border-warning/30" },
+          { label:"At Reorder",  count: recs.filter(r=>r.status==="AT_REORDER").length, cls:"bg-blue-50 text-info border-info/30" },
+          { label:"Total Items", count: recs.length,                                    cls:"bg-lear-gray-050 text-lear-gray-600 border-lear-gray-200" },
         ].map(s => (
           <div key={s.label} className={`flex items-center gap-1.5 px-3 py-1 border rounded-full text-xs font-semibold ${s.cls}`}>
             {s.count} {s.label}
