@@ -235,8 +235,7 @@ export default function ReportsPage() {
                 </div>
               </div>
             </div>
-
-            <AbcDistributionCard supabase={supabase} isManager={isManager} facilityId={facilityId} />
+<AbcDistributionCard supabase={supabase} isManager={isManager} facilityId={facilityId ?? null} />
           </div>
         </div>
       )}
