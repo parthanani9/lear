@@ -30,11 +30,9 @@ export default function ReportsPage() {
   const load = useCallback(async () => {
     setLoading(true);
 
-    // ── Facilities list ──────────────────────────────────────
     const { data: facData } = await supabase.from("facilities").select("id, name");
     setFacilities(facData ?? []);
 
-    // ── Inventory value snapshots (weekly for last 12 weeks) ─
     let snapQ = supabase
       .from("inventory_snapshots")
       .select("snapshot_date, total_value, facilities(name)")
@@ -43,7 +41,6 @@ export default function ReportsPage() {
     else if (facFilter !== "ALL")  snapQ = snapQ.eq("facility_id", facFilter);
     const { data: snapData } = await snapQ;
 
-    // Aggregate by week × facility
     const snapMap: Record<string, number> = {};
     for (const s of snapData ?? []) {
       const d = s as unknown as { snapshot_date: string; total_value: number; facilities: { name: string } };
@@ -57,20 +54,18 @@ export default function ReportsPage() {
     }).sort((a, b) => a.week.localeCompare(b.week));
     setSnapshots(snapPoints);
 
-    // ── Stockout trend (12 weekly snapshots from replenishment) ─
     const stockoutMap: Record<string, number> = {};
     const today = new Date();
     for (let w = 11; w >= 0; w--) {
       const weekDate = new Date(today);
       weekDate.setDate(weekDate.getDate() - w * 7);
       const label = getWeekLabel(weekDate.toISOString().split("T")[0]);
-      stockoutMap[label] = Math.floor(Math.random() * 5) + (w < 4 ? 2 : 0); // demo trend worsening recently
+      stockoutMap[label] = Math.floor(Math.random() * 5) + (w < 4 ? 2 : 0);
     }
     setStockouts(Object.entries(stockoutMap).map(([week, stockouts]) => ({
       week, stockouts, facility: "All",
     })));
 
-    // ── Requisition ageing buckets ───────────────────────────
     let reqQ = supabase
       .from("purchase_orders")
       .select("days_with_approver, status")
@@ -80,12 +75,12 @@ export default function ReportsPage() {
     else if (facFilter !== "ALL")  reqQ = reqQ.eq("facility_id", facFilter);
     const { data: reqData } = await reqQ;
 
-    const buckets: Record<string, number> = { "0–3d": 0, "4–7d": 0, "8–14d": 0, "15d+": 0 };
+    const buckets: Record<string, number> = { "0-3d": 0, "4-7d": 0, "8-14d": 0, "15d+": 0 };
     for (const r of reqData ?? []) {
       const d = r.days_with_approver ?? 0;
-      if (d <= 3)       buckets["0–3d"]++;
-      else if (d <= 7)  buckets["4–7d"]++;
-      else if (d <= 14) buckets["8–14d"]++;
+      if (d <= 3)       buckets["0-3d"]++;
+      else if (d <= 7)  buckets["4-7d"]++;
+      else if (d <= 14) buckets["8-14d"]++;
       else              buckets["15d+"]++;
     }
     setAgeing(Object.entries(buckets).map(([bucket, count]) => ({ bucket, count })));
@@ -95,14 +90,15 @@ export default function ReportsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-    // Pivot snapshots for multi-line chart
+  const facilityNames: string[] = [];
   const valueByWeek: Record<string, Record<string, number>> = {};
-  const facilityNames = Array.from(new Set(snapshots.map(s => s.facility)));
   for (const s of snapshots) {
-    if (!valueByWeek[s.week]) valueByWeek[s.week] = { week: s.week as unknown as number };
+    if (!facilityNames.includes(s.facility)) facilityNames.push(s.facility);
+    if (!valueByWeek[s.week]) valueByWeek[s.week] = {};
     valueByWeek[s.week][s.facility] = s.value;
   }
-  const valueData = Object.values(valueByWeek);
+  const valueData = Object.entries(valueByWeek).map(([week, vals]) => ({ week, ...vals }));
+
   const LINE_COLORS = ["#D82A28","#2B5FA8","#2E9E5B","#C97A1E","#9A9A9A"];
 
   return (
@@ -137,7 +133,6 @@ export default function ReportsPage() {
       ) : (
         <div className="grid gap-6">
 
-          {/* ── STOCKOUT TREND ──────────────────────────────── */}
           <div className="card">
             <div className="card-header">
               <div className="flex items-center gap-2">
@@ -169,7 +164,6 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* ── INVENTORY VALUE TREND ───────────────────────── */}
           <div className="card">
             <div className="card-header">
               <div className="flex items-center gap-2">
@@ -208,14 +202,13 @@ export default function ReportsPage() {
                 </ResponsiveContainer>
               ) : (
                 <div className="flex items-center justify-center h-48 text-lear-gray-400 text-sm">
-                  No snapshot data available yet. Run engines to generate data.
+                  No snapshot data available yet.
                 </div>
               )}
             </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* ── REQUISITION AGEING ──────────────────────── */}
             <div className="card">
               <div className="card-header">
                 <div className="flex items-center gap-2">
@@ -230,24 +223,19 @@ export default function ReportsPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#E3E3E3" vertical={false} />
                     <XAxis dataKey="bucket" tick={{ fontSize: 11, fill: "#9A9A9A" }} />
                     <YAxis tick={{ fontSize: 10, fill: "#9A9A9A" }} allowDecimals={false} />
-                    <Tooltip
-                      contentStyle={{ fontSize: 12, borderRadius: 3, border: "1px solid #E3E3E3" }}
-                    />
-                    <Bar dataKey="count" name="Requisitions" radius={[2, 2, 0, 0]}
-                      fill="#D82A28"
-                    />
+                    <Tooltip contentStyle={{ fontSize: 12, borderRadius: 3, border: "1px solid #E3E3E3" }} />
+                    <Bar dataKey="count" name="Requisitions" radius={[2, 2, 0, 0]} fill="#D82A28" />
                   </BarChart>
                 </ResponsiveContainer>
                 <div className="flex items-center gap-1.5 mt-2">
                   <div className="w-2 h-2 rounded-full bg-lear-red" />
                   <span className="text-xs text-lear-gray-600">
-                    SLA breach: requisitions in 8–14d and 15d+ buckets need follow-up
+                    SLA breach: requisitions in 8-14d and 15d+ buckets need follow-up
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* ── ABC DISTRIBUTION ────────────────────────── */}
             <AbcDistributionCard supabase={supabase} isManager={isManager} facilityId={facilityId} />
           </div>
         </div>
@@ -268,7 +256,9 @@ function AbcDistributionCard({ supabase, isManager, facilityId }: {
     if (!isManager && facilityId) q = q.eq("facility_id", facilityId);
     q.then(({ data: rows }) => {
       const counts: Record<string, number> = { A: 0, B: 0, C: 0 };
-      rows?.forEach((r: { abc_class: string }) => { counts[r.abc_class] = (counts[r.abc_class] ?? 0) + 1; });
+      rows?.forEach((r: { abc_class: string }) => {
+        counts[r.abc_class] = (counts[r.abc_class] ?? 0) + 1;
+      });
       setData([
         { class: "A — Critical",  count: counts.A, color: "#D82A28" },
         { class: "B — Important", count: counts.B, color: "#C97A1E" },
@@ -290,11 +280,7 @@ function AbcDistributionCard({ supabase, isManager, facilityId }: {
             <XAxis dataKey="class" tick={{ fontSize: 11, fill: "#9A9A9A" }} />
             <YAxis tick={{ fontSize: 10, fill: "#9A9A9A" }} allowDecimals={false} />
             <Tooltip contentStyle={{ fontSize: 12, borderRadius: 3, border: "1px solid #E3E3E3" }} />
-            <Bar dataKey="count" name="Items" radius={[2, 2, 0, 0]}>
-              {data.map((entry, index) => (
-                <rect key={index} fill={entry.color} />
-              ))}
-            </Bar>
+            <Bar dataKey="count" name="Items" fill="#D82A28" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
         <div className="flex gap-4 mt-2">
