@@ -43,13 +43,13 @@ export default function CrossPlantPage() {
   const facilityId: string | null = authUser?.facilityId ?? null;
   const isManager = ["manager", "admin"].includes(role);
 
-  const [crossData, setCrossData]   = useState<CrossPlantRow[]>([]);
-  const [transfers, setTransfers]   = useState<EnrichedTransfer[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [running, setRunning]       = useState(false);
+  const [crossData, setCrossData]         = useState<CrossPlantRow[]>([]);
+  const [transfers, setTransfers]         = useState<EnrichedTransfer[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [running, setRunning]             = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
-  const [activeTab, setActiveTab]   = useState<"active" | "completed">("active");
-  const [toast, setToast]           = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [activeTab, setActiveTab]         = useState<"active" | "completed">("active");
+  const [toast, setToast]                 = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -119,23 +119,28 @@ export default function CrossPlantPage() {
   async function approveTransfer(t: EnrichedTransfer) {
     if (!authUser) return;
     setActionLoading(p => ({ ...p, [t.id]: true }));
+
     await supabase.from("transfer_recommendations").update({
-      status: "APPROVED",
+      status:      "APPROVED",
       approved_by: authUser.id,
       approved_at: new Date().toISOString(),
     }).eq("id", t.id);
+
     const planners = await supabase
       .from("user_profiles").select("id")
       .in("facility_id", [t.from_facility.id, t.to_facility.id])
       .eq("role", "planner");
+
     for (const p of planners.data ?? []) {
       await supabase.from("notifications").insert({
         user_id: p.id,
-        title: "Transfer Approved",
+        title:   "Transfer Approved",
         message: `Transfer of ${t.recommended_qty} units of ${t.items.sku_code} from ${t.from_facility.name} to ${t.to_facility.name} has been approved.`,
-        type: "info", link: "/cross-plant",
+        type:    "info",
+        link:    "/cross-plant",
       });
     }
+
     showToast(`Transfer approved — ${t.from_facility.name} → ${t.to_facility.name} notified`);
     setActionLoading(p => ({ ...p, [t.id]: false }));
     load();
@@ -143,28 +148,58 @@ export default function CrossPlantPage() {
 
   async function rejectTransfer(id: string) {
     setActionLoading(p => ({ ...p, [id]: true }));
+
+    const transfer = transfers.find(t => t.id === id);
+
     await supabase.from("transfer_recommendations").update({
-      status: "REJECTED", rejection_reason: "Rejected by manager",
+      status:           "REJECTED",
+      rejection_reason: "Rejected by manager",
     }).eq("id", id);
-    showToast("Transfer rejected", "error");
+
+    if (transfer) {
+      const planners = await supabase
+        .from("user_profiles").select("id")
+        .in("facility_id", [transfer.from_facility_id, transfer.to_facility_id])
+        .eq("role", "planner");
+
+      for (const p of planners.data ?? []) {
+        await supabase.from("notifications").insert({
+          user_id: p.id,
+          title:   "Transfer Rejected",
+          message: `The proposed transfer of ${transfer.items?.sku_code} from ${transfer.from_facility?.name} to ${transfer.to_facility?.name} was rejected by management.`,
+          type:    "error",
+          link:    "/cross-plant",
+        });
+      }
+    }
+
+    showToast("Transfer rejected — planners notified", "error");
     setActionLoading(p => ({ ...p, [id]: false }));
     load();
   }
 
   async function markInitiated(t: EnrichedTransfer) {
     setActionLoading(p => ({ ...p, [t.id]: true }));
-    await supabase.from("transfer_recommendations").update({ status: "INITIATED" }).eq("id", t.id);
+
+    await supabase.from("transfer_recommendations").update({
+      status: "INITIATED",
+    }).eq("id", t.id);
+
     const destPlanners = await supabase
       .from("user_profiles").select("id")
-      .eq("facility_id", t.to_facility.id).eq("role", "planner");
+      .eq("facility_id", t.to_facility.id)
+      .eq("role", "planner");
+
     for (const p of destPlanners.data ?? []) {
       await supabase.from("notifications").insert({
         user_id: p.id,
-        title: "Transfer In Transit",
-        message: `${t.recommended_qty} units of ${t.items.sku_code} from ${t.from_facility.name} are on the way. Confirm receipt when arrived.`,
-        type: "warning", link: "/cross-plant",
+        title:   "Transfer In Transit",
+        message: `${t.recommended_qty} units of ${t.items.sku_code} from ${t.from_facility.name} are on the way. Please confirm receipt when arrived.`,
+        type:    "warning",
+        link:    "/cross-plant",
       });
     }
+
     showToast(`Marked as in transit — ${t.to_facility.name} planner notified`);
     setActionLoading(p => ({ ...p, [t.id]: false }));
     load();
@@ -173,38 +208,46 @@ export default function CrossPlantPage() {
   async function confirmReceipt(t: EnrichedTransfer) {
     setActionLoading(p => ({ ...p, [t.id]: true }));
 
-    await supabase.from("transfer_recommendations").update({ status: "COMPLETED" }).eq("id", t.id);
+    await supabase.from("transfer_recommendations").update({
+      status: "COMPLETED",
+    }).eq("id", t.id);
 
     const { data: fromPos } = await supabase
       .from("inventory_positions").select("id, stock_qty")
-      .eq("item_id", t.item_id).eq("facility_id", t.from_facility_id).single();
+      .eq("item_id", t.item_id)
+      .eq("facility_id", t.from_facility_id)
+      .single();
 
     const { data: toPos } = await supabase
       .from("inventory_positions").select("id, stock_qty")
-      .eq("item_id", t.item_id).eq("facility_id", t.to_facility_id).single();
+      .eq("item_id", t.item_id)
+      .eq("facility_id", t.to_facility_id)
+      .single();
 
     if (fromPos) {
       await supabase.from("inventory_positions").update({
-        stock_qty: Math.max(0, Number(fromPos.stock_qty) - t.recommended_qty),
+        stock_qty:   Math.max(0, Number(fromPos.stock_qty) - t.recommended_qty),
         snapshot_at: new Date().toISOString(),
       }).eq("id", fromPos.id);
     }
 
     if (toPos) {
       await supabase.from("inventory_positions").update({
-        stock_qty: Number(toPos.stock_qty) + t.recommended_qty,
+        stock_qty:   Number(toPos.stock_qty) + t.recommended_qty,
         snapshot_at: new Date().toISOString(),
       }).eq("id", toPos.id);
     }
 
     await supabase.from("audit_log").insert({
-      user_id: authUser?.id,
+      user_id:     authUser?.id,
       action_type: "TRANSFER_COMPLETED",
       entity_type: "transfer_recommendations",
-      entity_id: t.id,
+      entity_id:   t.id,
       new_value: {
-        item: t.items.sku_code, qty: t.recommended_qty,
-        from: t.from_facility.name, to: t.to_facility.name,
+        item:      t.items.sku_code,
+        qty:       t.recommended_qty,
+        from:      t.from_facility.name,
+        to:        t.to_facility.name,
         completed: new Date().toISOString(),
       },
       facility_id: t.to_facility_id,
@@ -213,13 +256,16 @@ export default function CrossPlantPage() {
     await supabase.functions.invoke("mrp-engine", {});
 
     const managers = await supabase
-      .from("user_profiles").select("id").in("role", ["manager", "admin"]);
+      .from("user_profiles").select("id")
+      .in("role", ["manager", "admin"]);
+
     for (const mgr of managers.data ?? []) {
       await supabase.from("notifications").insert({
         user_id: mgr.id,
-        title: "Transfer Completed",
-        message: `${t.recommended_qty} units of ${t.items.sku_code} received at ${t.to_facility.name}. Inventory updated.`,
-        type: "success", link: "/cross-plant",
+        title:   "Transfer Completed",
+        message: `${t.recommended_qty} units of ${t.items.sku_code} received at ${t.to_facility.name} from ${t.from_facility.name}. Inventory updated automatically.`,
+        type:    "success",
+        link:    "/cross-plant",
       });
     }
 
@@ -247,7 +293,7 @@ export default function CrossPlantPage() {
     return facilityId === t.to_facility_id;
   }
 
-  const activeTransfers    = transfers.filter(t => !["COMPLETED","REJECTED"].includes(t.status));
+  const activeTransfers    = transfers.filter(t => !["COMPLETED", "REJECTED"].includes(t.status));
   const completedTransfers = transfers.filter(t => t.status === "COMPLETED");
 
   const signalStyles: Record<string, string> = {
@@ -281,7 +327,7 @@ export default function CrossPlantPage() {
       />
 
       <div className="flex flex-wrap gap-2 mb-5">
-        {(["RECOMMENDED","APPROVED","INITIATED","COMPLETED"] as TransferStatus[]).map((s, i) => (
+        {(["RECOMMENDED", "APPROVED", "INITIATED", "COMPLETED"] as TransferStatus[]).map((s, i) => (
           <div key={s} className="flex items-center gap-1.5 text-xs text-lear-gray-600">
             {i > 0 && <ArrowRight className="w-3 h-3 text-lear-gray-300" />}
             <span className={STATUS_CONFIG[s].badge + " badge"}>{STATUS_CONFIG[s].label}</span>
@@ -291,7 +337,7 @@ export default function CrossPlantPage() {
 
       <div className="mb-6">
         <div className="flex gap-1 border-b border-lear-gray-200 mb-3">
-          {(["active","completed"] as const).map(tab => (
+          {(["active", "completed"] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={clsx("px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
                 activeTab === tab
@@ -346,16 +392,19 @@ export default function CrossPlantPage() {
                         {t.status === "RECOMMENDED" && isManager && (
                           <>
                             <button onClick={() => approveTransfer(t)}
-                              disabled={actionLoading[t.id]} className="btn-success btn-sm">
+                              disabled={actionLoading[t.id]}
+                              className="btn-success btn-sm">
                               <CheckCircle className="w-3.5 h-3.5" />
                               {actionLoading[t.id] ? "Approving…" : "Approve"}
                             </button>
                             <button onClick={() => rejectTransfer(t.id)}
-                              disabled={actionLoading[t.id]} className="btn-danger btn-sm">
+                              disabled={actionLoading[t.id]}
+                              className="btn-danger btn-sm">
                               <XCircle className="w-3.5 h-3.5" /> Reject
                             </button>
                           </>
                         )}
+
                         {canInitiate(t) && (
                           <button onClick={() => markInitiated(t)}
                             disabled={actionLoading[t.id]}
@@ -364,13 +413,16 @@ export default function CrossPlantPage() {
                             {actionLoading[t.id] ? "Updating…" : "Mark as Shipped"}
                           </button>
                         )}
+
                         {canConfirmReceipt(t) && (
                           <button onClick={() => confirmReceipt(t)}
-                            disabled={actionLoading[t.id]} className="btn-primary btn-sm">
+                            disabled={actionLoading[t.id]}
+                            className="btn-primary btn-sm">
                             <PackageCheck className="w-3.5 h-3.5" />
                             {actionLoading[t.id] ? "Updating inventory…" : "Confirm Receipt"}
                           </button>
                         )}
+
                         {t.status === "INITIATED" && !canConfirmReceipt(t) && (
                           <span className="flex items-center gap-1.5 text-xs text-lear-gray-400">
                             <Clock className="w-3.5 h-3.5" />
@@ -387,8 +439,8 @@ export default function CrossPlantPage() {
                     </div>
 
                     <div className="mt-3 flex items-center gap-1">
-                      {(["RECOMMENDED","APPROVED","INITIATED","COMPLETED"] as TransferStatus[]).map(s => {
-                        const steps = ["RECOMMENDED","APPROVED","INITIATED","COMPLETED"];
+                      {(["RECOMMENDED", "APPROVED", "INITIATED", "COMPLETED"] as TransferStatus[]).map(s => {
+                        const steps = ["RECOMMENDED", "APPROVED", "INITIATED", "COMPLETED"];
                         const filled = steps.indexOf(t.status as TransferStatus) >= steps.indexOf(s);
                         return (
                           <div key={s} className={clsx("h-1 flex-1 rounded-full transition-colors",
