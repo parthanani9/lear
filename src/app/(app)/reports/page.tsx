@@ -97,8 +97,7 @@ export default function ReportsPage() {
 
   // Pivot snapshots for multi-line chart
   const valueByWeek: Record<string, Record<string, number>> = {};
-  const facilityNames = [...new Set(snapshots.map(s => s.facility))];
-  for (const s of snapshots) {
+const facilityNames = Array.from(new Set(snapshots.map(s => s.facility)));  for (const s of snapshots) {
     if (!valueByWeek[s.week]) valueByWeek[s.week] = { week: s.week as unknown as number };
     valueByWeek[s.week][s.facility] = s.value;
   }
