@@ -63,8 +63,9 @@ export function useAuth() {
   }, [loadProfile, supabase.auth]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "global" });
     setAuthUser(null);
+    window.location.href = "/login";
   }, [supabase]);
 
   const refreshProfile = useCallback(async () => {
