@@ -4,11 +4,12 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const DEMO_USERS = [
-  { label: "Admin",    email: "admin@lear.com",    role: "Admin" },
-  { label: "Manager",  email: "manager@lear.com",  role: "Manager" },
-  { label: "Planner",  email: "planner@lear.com",  role: "Planner" },
-  { label: "Area Lead",email: "arealead@lear.com", role: "Area Lead" },
-  { label: "Viewer",   email: "viewer@lear.com",   role: "Viewer" },
+  { label: "Admin",      email: "admin@lear.com",    role: "Admin" },
+  { label: "Manager",    email: "manager@lear.com",  role: "Manager" },
+  { label: "Planner A",  email: "planner@lear.com",  role: "Planner — Plant A" },
+  { label: "Planner B",  email: "plannerb@lear.com", role: "Planner — Plant B" },  // ← add this
+  { label: "Area Lead",  email: "arealead@lear.com", role: "Area Lead" },
+  { label: "Viewer",     email: "viewer@lear.com",   role: "Viewer" },
 ];
 
 export default function LoginPage() {
